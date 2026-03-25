@@ -3,6 +3,8 @@ import {BuildResultStatus} from '../../../../../runner/workers/builder/builder-t
 import {ScoreCssVariable} from '../../shared/scoring';
 import {StackedBarChartData} from '../../shared/visualization/stacked-bar-chart/stacked-bar-chart';
 
+const MAX_VISIBLE_REPAIR_COUNT = 8;
+
 /**
  * Calculates the average number of repair attempts performed in a run.
  */
@@ -52,17 +54,41 @@ export function createRepairAttemptGraphData(report: RunInfoFromReportServer) {
     .filter((k): k is number => typeof k === 'number')
     .sort((a, b) => a - b);
 
-  // This graph might involve a bunch of sections. We want to scale them among all the possible color "grades".
+  if (intermediateRepairKeys.length <= MAX_VISIBLE_REPAIR_COUNT) {
+    for (const repairCount of intermediateRepairKeys) {
+      const applicationCount = repairsToAppCount.get(repairCount);
+      if (!applicationCount) continue;
 
-  for (let repairCount = 1; repairCount <= maxRepairCount; repairCount++) {
-    const applicationCount = repairsToAppCount.get(repairCount);
-    if (!applicationCount) continue;
+      data.push({
+        label: labelByRepairCount(repairCount),
+        color: colorByRepairCount(repairCount),
+        value: applicationCount,
+      });
+    }
+  } else {
+    const visibleKeys = intermediateRepairKeys.slice(0, MAX_VISIBLE_REPAIR_COUNT);
+    const hiddenKeys = intermediateRepairKeys.slice(MAX_VISIBLE_REPAIR_COUNT);
+    const maxVisible = visibleKeys[visibleKeys.length - 1];
 
-    data.push({
-      label: labelByRepairCount(repairCount),
-      color: colorByRepairCount(repairCount),
-      value: applicationCount,
-    });
+    for (const repairCount of visibleKeys) {
+      const applicationCount = repairsToAppCount.get(repairCount);
+      if (!applicationCount) continue;
+
+      data.push({
+        label: labelByRepairCount(repairCount),
+        color: colorByRepairCount(repairCount),
+        value: applicationCount,
+      });
+    }
+
+    const groupValue = hiddenKeys.reduce((acc, k) => acc + (repairsToAppCount.get(k) ?? 0), 0);
+    if (groupValue > 0) {
+      data.push({
+        label: `${maxVisible + 1}+ repairs`,
+        color: colorByRepairCount(maxVisible + 1),
+        value: groupValue,
+      });
+    }
   }
 
   // Handle 'Build failed even after all retries' - always maps to the "failure" grade.
@@ -77,17 +103,11 @@ export function createRepairAttemptGraphData(report: RunInfoFromReportServer) {
   return data;
 }
 
-function labelByRepairCount(repairCount: number): string {
-  switch (repairCount) {
-    case 1:
-      return '1 repair';
-    case 2:
-    case 3:
-    case 4:
-      return `${repairCount} repairs`;
-    default:
-      return '5+ repairs';
+export function labelByRepairCount(repairCount: number): string {
+  if (repairCount === 1) {
+    return '1 repair';
   }
+  return `${repairCount} repairs`;
 }
 
 function colorByRepairCount(repairCount: number): string {
